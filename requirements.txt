@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+faster-whisper
+yt-dlp
+numpy
+sentence-transformers
+summa
