@@ -159,3 +159,5 @@ def generate_chapters(transcript):
 @app.post("/chapters")
 def chapters(video_id: str):
     return {"video_id": video_id, "chapters": generate_chapters(transcribe(video_id))}
+
+#done
