@@ -9,7 +9,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# preload models
+# Preload models (faster first run)
 RUN python - <<EOF
 from faster_whisper import WhisperModel
 from sentence_transformers import SentenceTransformer
@@ -17,7 +17,7 @@ WhisperModel("base", compute_type="int8")
 SentenceTransformer("all-MiniLM-L6-v2")
 EOF
 
-COPY app/ app/
+COPY . .
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

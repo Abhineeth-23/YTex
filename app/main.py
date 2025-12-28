@@ -1,15 +1,23 @@
 from fastapi import FastAPI
 from faster_whisper import WhisperModel
-import yt_dlp, uuid, os
+import yt_dlp, uuid, os, re
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from summa import summarizer
-import re
-from openai import OpenAI
+from dotenv import load_dotenv
+import logging
+from groq import Groq
+from sklearn.cluster import KMeans
 
 # =========================
-# APP INIT
+# ENV
 # =========================
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+if client is None:
+    logging.warning("GROQ_API_KEY not set; LLM title generation will be disabled and fallback summarization will be used.")
+
 app = FastAPI()
 
 # =========================
@@ -19,22 +27,13 @@ whisper = WhisperModel("base", compute_type="int8")
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 # =========================
-# LLM CLIENT (OPTIONAL)
-# =========================
-USE_LLM = bool(os.getenv("OPENAI_API_KEY"))
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if USE_LLM else None
-
-# =========================
-# UTILS
+# UTIL
 # =========================
 def sec_to_time(sec: float) -> str:
-    m = int(sec // 60)
-    s = int(sec % 60)
-    return f"{m}:{s:02d}"
+    return f"{int(sec//60)}:{int(sec%60):02d}"
 
 # =========================
-# TRANSCRIPTION
+# TRANSCRIBE
 # =========================
 def transcribe(video_id: str):
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -45,10 +44,7 @@ def transcribe(video_id: str):
         "format": "bestaudio/best",
         "outtmpl": uid + ".%(ext)s",
         "quiet": True,
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "wav"
-        }]
+        "postprocessors": [{"key": "FFmpegExtractAudio","preferredcodec": "wav"}]
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -56,164 +52,110 @@ def transcribe(video_id: str):
 
     segments, _ = whisper.transcribe(audio)
     os.remove(audio)
-
     return [{"start": s.start, "text": s.text.strip()} for s in segments]
 
 # =========================
-# RULE-BASED CLEANER (FALLBACK)
+# FALLBACK CLEANER
 # =========================
 def clean_title(text: str) -> str:
-    text = text.lower()
-
-    # remove fillers
-    text = re.sub(
-        r"\b(so|well|okay|now|oh|alright|basically|just|actually|like|kind of|sort of)\b",
-        "",
-        text
-    )
-
-    # remove self references
-    text = re.sub(r"\b(i am|i'm|we are|we're|you are|you're|i|we|you)\b", "", text)
-
-    # remove weak verb phrases
-    text = re.sub(
-        r"(going to|want to|need to|trying to|talk about|show you|explain|walk through)",
-        "",
-        text
-    )
-
-    # normalize
-    text = re.sub(r"[^a-z\s]", " ", text)
+    text = re.sub(r"[^a-zA-Z\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-
-    # definition shortcut
-    if "what is" in text:
-        after = text.split("what is", 1)[1].strip()
-        topic = after.split()[:4]
-        if topic:
-            return ("What Is " + " ".join(topic)).title()
-
-    words = text.split()[:6]
-    title = " ".join(words).title()
-
-    return title if len(title) >= 8 else "Overview"
+    words = text.split()[:5]
+    return " ".join(words).title() if words else "Overview"
 
 # =========================
-# LLM TITLE GENERATOR
+# LLM TITLES (GROQ)
 # =========================
-def llm_generate_title(block: str) -> str | None:
-    if not USE_LLM:
-        return None
-
+def llm_generate_title(block: str):
     try:
-        prompt = f"""
-You are naming steps in a process.
+        if client is None:
+            return None
 
-From the transcript below, identify the MAIN ACTION or STEP
-and produce a short YouTube chapter title (3–6 words).
+        prompt = f"""
+You are generating structured chapter headings for a tutorial video.
+
+Your job:
+From the transcript below, identify the PRIMARY ACTION, STEP, or CONCEPT.
+Return ONLY a short professional chapter title.
 
 Rules:
-- Verb–noun or noun phrase style
-- No first-person language
-- No filler words
-- Do NOT paraphrase — abstract the action
-- Should be concise and descriptive
-- Title length: 3 to 7 words
-- Do NOT paraphrase — abstract the action
-
-Examples:
-"we chop the vegetables..." -> Chopping Vegetables  
-"now we cook the rice..." -> Cooking Rice  
-"add egg and mix" -> Adding Eggs  
+- 2–6 words
+- Verb + Noun or Noun Phrase
+- Abstract the meaning (do NOT paraphrase speech)
+- Sound like course topics:
+  Cooking Rice
+  Chopping Vegetables
+  Preparing Ingredients
+  Adding Eggs
+  Seasoning Food
+  Final Plating
 
 Transcript:
 {block}
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You generate structured YouTube chapter titles."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.25,
-            max_tokens=24
+        r = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role":"user","content":prompt}],
+            temperature=0.10,      # very low = forces structure
+            max_tokens=20
         )
 
-        title = response.choices[0].message.content.strip()
-        return title if 3 <= len(title.split()) <= 7 else None
+        return r.choices[0].message.content.strip()
 
     except Exception as e:
-        print("LLM title generation failed:", e)
+        print("LLM ERROR:", e)
         return None
 
 # =========================
-# CHAPTER ENGINE vrooom vrooooom
+# CHAPTER ENGINE
 # =========================
 def generate_chapters(transcript):
-    # ---- CLEAN TRANSCRIPT ----
-    clean = []
-    for t in transcript:
-        txt = t["text"].lower()
-        if len(txt) < 15:
-            continue
-        if any(x in txt for x in ["okay", "yeah", "huh", "correct"]):
-            continue
-        clean.append(t)
+    # Clean transcript
+    cleaned = [t for t in transcript if len(t["text"]) > 15]
+    texts = [t["text"] for t in cleaned]
+    times = [t["start"] for t in cleaned]
 
-    texts = [t["text"] for t in clean]
-    times = [t["start"] for t in clean]
+    # Embed all segments
+    embeddings = embedder.encode(texts)
 
-    if len(texts) < 10:
-        return [f"{sec_to_time(times[i])} {texts[i][:60]}" for i in range(len(texts))]
+    # Decide number of chapters (YouTube style)
+    k = min(12, max(5, len(texts)//20))
 
-    # ---- SEMANTIC SIMILARITY ----
-    emb = embedder.encode(texts)
-    sims = [np.dot(emb[i], emb[i + 1]) for i in range(len(emb) - 1)]
-    threshold = np.mean(sims) - 0.35 * np.std(sims)
+    # Global clustering
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto")
+    labels = kmeans.fit_predict(embeddings)
 
-    # ---- INITIAL CUTS ----
-    cuts = [0]
-    for i, s in enumerate(sims):
-        if s < threshold:
-            cuts.append(i + 1)
-    cuts.append(len(texts))
+    # Group clusters
+    clusters = {}
+    for i, label in enumerate(labels):
+        clusters.setdefault(label, []).append({
+            "text": texts[i],
+            "time": times[i]
+        })
 
-    # ---- MIN GAP FILTER (30s) ----
-    filtered = [cuts[0]]
-    for c in cuts[1:]:
-        if c >= len(times) or times[c] - times[filtered[-1]] >= 30:
-            filtered.append(c)
-
-    cuts = filtered[:12]
-
-    # ---- GENERATE TITLES ----
     chapters = []
-    for i in range(len(cuts) - 1):
-        block = " ".join(texts[cuts[i]:cuts[i + 1]])[:800]
+    for items in clusters.values():
+        cluster_text = " ".join([x["text"] for x in items])[:1200]
+        start_time = min(x["time"] for x in items)
 
-        # LLM first
-        title = llm_generate_title(block)
+        # LLM semantic abstraction
+        title = llm_generate_title(cluster_text)
+        if not title or len(title) < 8:
+            title = clean_title(cluster_text)
 
-        # fallback 1: summarizer
-        if not title:
-            title = summarizer.summarize(block, ratio=0.2)
+        chapters.append({
+            "time": start_time,
+            "title": title
+        })
 
-        # fallback 2: rule-based cleaner
-        if not title or len(title.strip()) < 10:
-            title = clean_title(block)
+    # Sort chronologically
+    chapters.sort(key=lambda x: x["time"])
 
-        chapters.append(f"{sec_to_time(times[cuts[i]])} {title}")
-
-    return chapters
-
+    return [f"{sec_to_time(c['time'])} {c['title']}" for c in chapters]
 # =========================
 # API
 # =========================
 @app.post("/chapters")
 def chapters(video_id: str):
-    transcript = transcribe(video_id)
-    return {
-        "video_id": video_id,
-        "chapters": generate_chapters(transcript)
-    }
+    return {"video_id": video_id, "chapters": generate_chapters(transcribe(video_id))}
