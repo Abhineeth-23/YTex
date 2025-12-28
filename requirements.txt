@@ -5,3 +5,4 @@ yt-dlp
 numpy
 sentence-transformers
 summa
+openai
