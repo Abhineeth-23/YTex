@@ -107,32 +107,48 @@ def llm_generate_title(block: str) -> str | None:
 
     try:
         prompt = f"""
-Create a concise YouTube chapter title (3–6 words).
-No filler. No first-person language. No punctuation at the end.
+You are naming steps in a process.
 
-Text:
+From the transcript below, identify the MAIN ACTION or STEP
+and produce a short YouTube chapter title (3–6 words).
+
+Rules:
+- Verb–noun or noun phrase style
+- No first-person language
+- No filler words
+- Do NOT paraphrase — abstract the action
+- Should be concise and descriptive
+- Title length: 3 to 7 words
+- Do NOT paraphrase — abstract the action
+
+Examples:
+"we chop the vegetables..." -> Chopping Vegetables  
+"now we cook the rice..." -> Cooking Rice  
+"add egg and mix" -> Adding Eggs  
+
+Transcript:
 {block}
 """
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You generate short YouTube chapter titles."},
+                {"role": "system", "content": "You generate structured YouTube chapter titles."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=20
+            temperature=0.25,
+            max_tokens=24
         )
 
         title = response.choices[0].message.content.strip()
         return title if 3 <= len(title.split()) <= 7 else None
 
     except Exception as e:
-        print("LLM error:", e)
+        print("LLM title generation failed:", e)
         return None
 
 # =========================
-# CHAPTER ENGINE
+# CHAPTER ENGINE vrooom vrooooom
 # =========================
 def generate_chapters(transcript):
     # ---- CLEAN TRANSCRIPT ----
