@@ -7,4 +7,3 @@ sentence-transformers
 summa
 groq
 python-dotenv
-scikit-learn
