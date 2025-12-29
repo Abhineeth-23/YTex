@@ -116,69 +116,63 @@ Transcript:
 # =========================
 def generate_chapters(transcript, use_llm: bool = True):
     # Clean transcript
-    cleaned = [t for t in transcript if len(t["text"]) > 15]
-    texts = [t["text"] for t in cleaned]
-    times = [t["start"] for t in cleaned]
+    segments = [t for t in transcript if len(t["text"]) > 15]
+    if not segments:
+        return ["0:00 Overview"]
 
-    if not texts:
-        return ["00:00 Overview"]
+    texts = [t["text"] for t in segments]
+    times = [t["start"] for t in segments]
 
-    # Embed and normalize
+    # Embed & normalize
     embeddings = np.array(embedder.encode(texts))
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     norms[norms == 0] = 1
     emb_norm = embeddings / norms
 
-    # Decide number of chapters based on content length
-    k = min(12, max(2, len(texts)//12))
-
-    logging.info("Generating %d chapters for %d segments", k, len(texts))
-
-    # Global clustering on normalized embeddings
+    # Number of topics
+    k = min(10, max(3, len(texts) // 20))
     kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto")
     labels = kmeans.fit_predict(emb_norm)
 
-    # Build clusters and pick representative sentences (closest to centroid)
-    clusters = {}
-    for idx, label in enumerate(labels):
-        clusters.setdefault(label, []).append(idx)
+    # === MERGE CONSECUTIVE SAME-TOPIC SEGMENTS ===
+    merged = []
+    cur_label = labels[0]
+    cur_start = times[0]
+    cur_texts = [texts[0]]
 
+    for i in range(1, len(labels)):
+        if labels[i] == cur_label:
+            cur_texts.append(texts[i])
+        else:
+            merged.append({
+                "start": cur_start,
+                "text": " ".join(cur_texts)
+            })
+            cur_label = labels[i]
+            cur_start = times[i]
+            cur_texts = [texts[i]]
+
+    merged.append({
+        "start": cur_start,
+        "text": " ".join(cur_texts)
+    })
+
+    # === TITLE GENERATION ===
     chapters = []
-    for label, indices in clusters.items():
-        centroid = kmeans.cluster_centers_[label]
-        c_norm = centroid / (np.linalg.norm(centroid) + 1e-9)
+    for block in merged:
+        text_block = block["text"][:1200]
 
-        # Rank segments by similarity to centroid
-        sims = np.dot(emb_norm[indices], c_norm)
-        ranked = sorted(zip(indices, sims), key=lambda x: x[1], reverse=True)
-        top_n = [i for i, s in ranked[:3]]
-        top_n_sorted = sorted(top_n, key=lambda i: times[i])
-
-        cluster_text = " ".join([texts[i] for i in top_n_sorted])
-        if len(cluster_text) > 1200:
-            cluster_text = cluster_text[:1200]
-        start_time = min(times[i] for i in top_n_sorted)
-
-        title = llm_generate_title(cluster_text, use_llm=use_llm)
-        source = "llm" if title else None
+        title = llm_generate_title(text_block, use_llm=use_llm)
+        if not title:
+            title = summarizer.summarize(text_block, ratio=0.25)
         if not title or len(title) < 6:
-            title = summarizer.summarize(cluster_text, ratio=0.2)
-            source = source or "summarizer"
-        if not title or len(title) < 6:
-            title = clean_title(cluster_text)
-            source = source or "clean"
+            title = clean_title(text_block)
 
-        logging.debug("Cluster %d (size=%d) -> %s (source=%s)", label, len(indices), title, source)
+        chapters.append(f"{sec_to_time(block['start'])} {title}")
 
-        chapters.append({
-            "time": start_time,
-            "title": title
-        })
+    return chapters
 
-    # Sort chronologically
-    chapters.sort(key=lambda x: x["time"])
 
-    return [f"{sec_to_time(c['time'])} {c['title']}" for c in chapters]
 # =========================
 # API
 # =========================

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "YT Smart Chapterizer",
+  "version": "1.0",
+  "description": "Generate topic-based YouTube chapters",
+  "permissions": ["activeTab"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
