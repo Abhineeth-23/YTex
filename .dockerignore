@@ -1,0 +1,5 @@
+# Ignore test artifacts and CI helpers from production Docker build
+Dockerfile.test
+run-tests-docker.sh
+run-tests-docker.ps1
+tests
