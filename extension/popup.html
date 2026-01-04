@@ -1,16 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h2>Smart Chapters</h2>
+  <div class="panel">
+    <div class="header">
+      <span>Youtube Chapter Generator<br>In this video</span>
+      <button id="closeBtn">✕</button>
+    </div>
 
-  <input id="url" placeholder="Paste YouTube URL">
-  <button id="generate">Generate</button>
+    <div class="tabs">
+      <button class="tab active">Chapters</button>
+    </div>
 
-  <div id="status"></div>
-  <ul id="chapters"></ul>
+    <div id="status" class="status"></div>
+
+    <div id="chapters" class="chapter-list"></div>
+  </div>
 
   <script src="popup.js"></script>
 </body>

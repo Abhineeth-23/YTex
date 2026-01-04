@@ -3,7 +3,15 @@
   "name": "YT Smart Chapterizer",
   "version": "1.0",
   "description": "Generate topic-based YouTube chapters",
-  "permissions": ["activeTab"],
+
+  "permissions": [
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+
   "action": {
     "default_popup": "popup.html"
   }
