@@ -112,27 +112,27 @@ def build_outline_transcript(segments, max_lines=40):
 # =========================
 def llm_generate_chapters(outline_text: str):
     prompt = f"""
-You are a professional YouTube video editor.
+    You are a professional YouTube video editor.
 
-Given the following condensed transcript outline, generate
-clear, topic-based chapter titles in chronological order.
+    Given the following condensed transcript outline, generate
+    clear, topic-based chapter titles in chronological order.
 
-Rules:
-- 5 to 8 chapters total
-- Each title must be 3–6 words
-- Titles must describe TOPICS, not speech
-- Return ONLY valid JSON in this format:
+    Rules:
+    - 5 to 8 chapters total
+    - Each title must be 3–6 words
+    - Titles must describe TOPICS, not speech
+    - Return ONLY valid JSON in this format:
 
-[
-  {{
-    "title": "Chapter title",
-    "start_hint": "short phrase indicating where this topic begins"
-  }}
-]
+    [
+    {{
+        "title": "Chapter title",
+        "start_hint": "short phrase indicating where this topic begins"
+    }}
+    ]
 
-Transcript outline:
-{outline_text}
-"""
+    Transcript outline:
+    {outline_text}
+    """
 
     response = client.chat.completions.create(
         model=GROQ_MODEL,
