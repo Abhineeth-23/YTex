@@ -7,6 +7,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from groq import Groq
 from dotenv import load_dotenv
 import yt_dlp
@@ -52,17 +53,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
-    return {
-        "service": "YT Smart Chapterizer API",
-        "status": "online",
-        "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "generate_chapters": "POST /chapters?video_id={youtube_id}"
-        }
-    }
+
 
 # =========================
 # MODELS (Lazy-loaded on demand to preserve RAM)
@@ -354,6 +345,13 @@ def health():
         "llm_model": GROQ_MODEL,
         "groq_configured": bool(os.getenv("GROQ_API_KEY")),
     }
+
+# =========================
+# MOUNT LANDING PAGE & DOWNLOADS
+# =========================
+DOCS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs")
+if os.path.exists(DOCS_DIR):
+    app.mount("/", StaticFiles(directory=DOCS_DIR, html=True), name="site")
 
 if __name__ == "__main__":
     import uvicorn

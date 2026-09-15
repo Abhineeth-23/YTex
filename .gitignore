@@ -23,6 +23,7 @@ app/cache/
 
 # Local Artifacts & Zips
 yt-smart-chapterizer.zip
+!docs/yt-smart-chapterizer.zip
 .DS_Store
 Thumbs.db
 .superpowers/
