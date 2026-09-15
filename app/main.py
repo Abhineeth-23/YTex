@@ -102,66 +102,88 @@ def transcribe(video_id: str):
     # 1. Attempt to fetch pre-existing captions directly (Takes ~1 second)
     try:
         logger.info("Attempting to fetch pre-existing subtitles for video: %s", video_id)
-        ytt_api = YouTubeTranscriptApi()
-        transcript = ytt_api.fetch(video_id, languages=['en', 'en-US'])
-        transcript_data = transcript.to_raw_data()
-        cleaned = [
-            {"start": item["start"], "text": item["text"].strip()}
-            for item in transcript_data
-            if len(item["text"].strip()) > 3
-        ]
-        if cleaned:
-            logger.info("Successfully loaded %d captions from YouTube transcript API", len(cleaned))
-            return cleaned
+        data = None
+        # Try direct get_transcript (fastest)
+        try:
+            data = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US', 'en-GB'])
+        except Exception as e_direct:
+            logger.info("Direct transcript fetch failed: %s, inspecting available transcripts...", e_direct)
+            try:
+                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                t = None
+                try:
+                    t = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
+                except Exception:
+                    try:
+                        t = transcript_list.find_generated_transcript(['en', 'en-US', 'en-GB'])
+                    except Exception:
+                        t = next(iter(transcript_list), None)
+                        if t and t.is_translatable:
+                            t = t.translate('en')
+                if t:
+                    data = t.fetch()
+            except Exception as e_list:
+                logger.info("List transcripts failed: %s", e_list)
+
+        if data:
+            cleaned = [
+                {"start": item["start"], "text": item["text"].strip()}
+                for item in data
+                if len(item.get("text", "").strip()) > 3
+            ]
+            if cleaned:
+                logger.info("Successfully loaded %d captions from YouTube transcript API", len(cleaned))
+                return cleaned
     except Exception as e:
         logger.warning("Subtitles fetch failed: %s. Falling back to Whisper transcription.", e)
 
     # 2. Fallback: Audio download + optimized Whisper transcription
     url = f"https://www.youtube.com/watch?v={video_id}"
     
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Download low bitrate audio directly without FFmpeg wav conversion overhead
-        audio_template = os.path.join(tmpdir, "audio.%(ext)s")
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_template = os.path.join(tmpdir, "audio.%(ext)s")
 
-        ydl_opts = {
-            "format": "worstaudio/worst",
-            "outtmpl": audio_template,
-            "quiet": True,
-            "extractor_args": {
-                "youtube": {
-                    "player_client": ["default", "-android_sdkless"]
+            ydl_opts = {
+                "format": "worstaudio/worst",
+                "outtmpl": audio_template,
+                "quiet": True,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["default", "-android_sdkless"]
+                    }
+                },
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
-            },
-            "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-        }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-        # Locate the downloaded file (could be webm, m4a, etc.)
-        audio_file = None
-        for file in os.listdir(tmpdir):
-            if file.startswith("audio."):
-                audio_file = os.path.join(tmpdir, file)
-                break
+            audio_file = None
+            for file in os.listdir(tmpdir):
+                if file.startswith("audio."):
+                    audio_file = os.path.join(tmpdir, file)
+                    break
 
-        if not audio_file or not os.path.exists(audio_file):
-            raise RuntimeError("Failed to download fallback audio from YouTube")
+            if not audio_file or not os.path.exists(audio_file):
+                logger.warning("Audio file could not be downloaded via yt-dlp")
+                return []
 
-        logger.info("Transcribing audio using Whisper (beam_size=1, VAD enabled)")
-        # beam_size=1 (greedy search) is 2-3x faster. vad_filter=True ignores silence.
-        whisper = get_whisper()
-        segments, _ = whisper.transcribe(audio_file, beam_size=1, vad_filter=True)
-        
-        cleaned = [
-            {"start": s.start, "text": s.text.strip()}
-            for s in segments
-            if len(s.text.strip()) > 3
-        ]
-
-    return cleaned
+            logger.info("Transcribing audio using Whisper (beam_size=1, VAD enabled)")
+            whisper = get_whisper()
+            segments, _ = whisper.transcribe(audio_file, beam_size=1, vad_filter=True)
+            
+            cleaned = [
+                {"start": s.start, "text": s.text.strip()}
+                for s in segments
+                if len(s.text.strip()) > 3
+            ]
+            return cleaned
+    except Exception as e:
+        logger.warning("Fallback audio download and transcription failed: %s", e)
+        return []
 
 # =========================
 # OUTLINE TRANSCRIPT (TOKEN SAFE)
