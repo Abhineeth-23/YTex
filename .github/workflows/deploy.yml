@@ -1,0 +1,113 @@
+name: Deploy & Zero-Leak Security Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================
+  # JOB 1: Security Audit & Secret Leak Check
+  # ==========================================
+  security-audit:
+    name: Security & Secret Leak Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify .env is strictly untracked
+        run: |
+          echo "Checking for accidental .env file tracking..."
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::CRITICAL SECURITY VIOLATION: .env file is committed to git!"
+            exit 1
+          fi
+          echo "Verified: .env is untracked."
+
+      - name: Scan for leaked API key patterns
+        run: |
+          echo "Scanning tracked codebase for live Groq API keys..."
+          # Match typical Groq keys (gsk_...) while ignoring .env.example
+          if git grep -I -E "gsk_[a-zA-Z0-9]{20,}" -- ':!*.example' ':!docs/superpowers/*'; then
+            echo "::error::CRITICAL SECURITY VIOLATION: Live Groq API key pattern found in tracked repository code!"
+            exit 1
+          fi
+          echo "Verified: No live API keys detected in repository."
+
+  # ==========================================
+  # JOB 2: Package Extension & Deploy Pages
+  # ==========================================
+  package-and-deploy-pages:
+    name: Package Extension & Deploy GitHub Pages
+    needs: security-audit
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Package Chrome Extension into ZIP
+        run: |
+          echo "Creating extension distribution package..."
+          mkdir -p docs
+          cd extension
+          zip -r ../docs/yt-smart-chapterizer.zip . -x "*.git*" -x "*__pycache__*" -x "*.DS_Store*" -x "*.env*"
+          cd ..
+          ls -lh docs/yt-smart-chapterizer.zip
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'docs'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # ==========================================
+  # JOB 3: Trigger Render Container Deployment
+  # ==========================================
+  deploy-render:
+    name: Trigger Render Backend Deployment
+    needs: security-audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$DEPLOY_HOOK" ]; then
+            echo "Triggering automated container build on Render..."
+            response=$(curl -s -w "\n%{http_code}" -X POST "$DEPLOY_HOOK")
+            http_code=$(echo "$response" | tail -n1)
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              echo "Render deploy hook triggered successfully (HTTP $http_code)."
+            else
+              echo "::warning::Render deploy hook returned status $http_code: $response"
+            fi
+          else
+            echo "RENDER_DEPLOY_HOOK_URL secret not configured in GitHub repository."
+            echo "To enable automated container redeployment on Render:"
+            echo "1. Go to your Render Dashboard -> Service Settings -> Deploy Hook."
+            echo "2. Copy the Deploy Hook URL."
+            echo "3. Add it to GitHub: Settings -> Secrets and variables -> Actions -> RENDER_DEPLOY_HOOK_URL."
+          fi
