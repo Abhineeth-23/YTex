@@ -1,96 +1,293 @@
+/* Sage & Lime Neo-Brutalist Theme */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --sage-bg: #a9b8a8;
+  --lime-accent: #d2ff36;
+  --card-white: #fafbfa;
+  --text-dark: #111111;
+  --card-dark: #121214;
+  --text-muted: #6b7280;
+  --border-radius-lg: 22px;
+  --border-radius-md: 18px;
+  --border-radius-sm: 10px;
+  --font-stack: 'Outfit', system-ui, -apple-system, sans-serif;
+}
+
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  background: #0f0f0f;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #fff;
+  background: var(--sage-bg);
+  font-family: var(--font-stack);
+  color: var(--text-dark);
   width: 360px;
+  padding: 12px;
+  overflow: hidden;
 }
 
 .panel {
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
+/* Header Widget Card */
 .header {
+  background: var(--card-white);
+  border-radius: var(--border-radius-lg);
+  padding: 14px 18px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 16px;
-  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.logo-area {
+  display: flex;
+  flex-direction: column;
+}
+
+.logo-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-dark);
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.logo-sub {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-top: 2px;
+}
+
+#closeBtn {
+  background: #f1f3f0;
+  border: none;
+  color: var(--text-dark);
+  font-size: 11px;
+  font-weight: bold;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#closeBtn:hover {
+  background: #e2e6e1;
+  transform: scale(1.05);
+}
+
+.divider {
+  display: none; /* No divider lines needed in card-widget layout */
+}
+
+/* Loading Widget (Dark Black Card, like bottom-middle widget) */
+.loading-container {
+  background: var(--card-dark);
+  border-radius: var(--border-radius-lg);
+  padding: 36px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  animation: fadeIn 0.3s ease-out;
+}
+
+.spinner-glow {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 20px;
+}
+
+.spinner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 35%, var(--lime-accent) 100%);
+  animation: spin 0.8s infinite linear;
+  mask: radial-gradient(circle, transparent 58%, black 60%);
+  -webkit-mask: radial-gradient(circle, transparent 58%, black 60%);
+}
+
+.loading-pulse {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.3px;
+  margin-bottom: 6px;
+  animation: pulseText 1.5s infinite ease-in-out;
+}
+
+.loading-subtext {
+  font-size: 13px;
+  color: #a1a1aa;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 240px;
+  height: 38px;
+}
+
+/* Error Widget (White Card) */
+.error-container {
+  background: var(--card-white);
+  border-radius: var(--border-radius-lg);
+  padding: 24px;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.error-icon {
+  font-size: 36px;
   margin-bottom: 10px;
 }
 
-.close {
-  cursor: pointer;
-  opacity: 0.7;
+.error-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #ef4444;
+  margin-bottom: 6px;
 }
 
-.tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+.error-msg {
+  font-size: 13px;
+  color: #4b5563;
+  margin-bottom: 18px;
+  line-height: 1.4;
 }
 
-.tab {
-  background: #272727;
+/* Buttons */
+.btn {
+  font-family: var(--font-stack);
+  font-size: 13px;
+  font-weight: 700;
   border: none;
-  color: #aaa;
-  padding: 6px 12px;
-  border-radius: 12px;
-  font-size: 13px;
+  border-radius: 24px;
+  padding: 10px 22px;
   cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.tab.active {
-  background: #fff;
-  color: #000;
-  font-weight: 600;
+.primary-btn {
+  background: var(--card-dark);
+  color: #ffffff;
 }
 
-.tab.disabled {
-  opacity: 0.4;
-  cursor: default;
+.primary-btn:hover {
+  background: #27272a;
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
-.status {
-  font-size: 13px;
-  color: #aaa;
-  margin-bottom: 8px;
+.secondary-btn {
+  background: var(--card-white);
+  color: var(--text-dark);
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  border-radius: var(--border-radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 
+.secondary-btn:hover {
+  background: var(--lime-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.secondary-btn svg {
+  stroke: var(--text-dark);
+  transition: transform 0.3s ease;
+}
+
+.secondary-btn:hover svg {
+  transform: rotate(-180deg);
+}
+
+/* Chapters Container & List */
 .chapter-list {
-  max-height: 420px;
+  max-height: 390px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  padding-right: 2px;
+  animation: fadeIn 0.4s ease-out;
 }
 
-/* ---- CHAPTER ITEM ---- */
+.chapter-list::-webkit-scrollbar {
+  width: 4px;
+}
 
+.chapter-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chapter-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+}
+
+.chapter-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Chapter Card Widgets (White Rounded Cards) */
 .chapter {
   display: flex;
-  gap: 10px;
-  padding: 6px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 10px;
+  background: var(--card-white);
+  border-radius: var(--border-radius-md);
   cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
 }
 
+/* Hover morphs card into Lime Yellow Accent */
 .chapter:hover {
-  background: #1f1f1f;
+  background: var(--lime-accent);
+  transform: scale(1.02) translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.chapter:active {
+  transform: scale(0.99);
 }
 
 .thumb {
-  width: 96px;
-  height: 54px;
+  width: 78px;
+  height: 46px;
   background: #000;
-  border-radius: 6px;
+  border-radius: var(--border-radius-sm);
   position: relative;
   overflow: hidden;
   flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .thumb img {
@@ -101,25 +298,54 @@ body {
 
 .time {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
-  background: rgba(0,0,0,0.8);
-  color: #3ea6ff;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
+  bottom: 2px;
+  right: 2px;
+  background: var(--card-dark);
+  color: var(--lime-accent);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-weight: 700;
+  border: 1px solid rgba(210, 255, 54, 0.15);
 }
 
 .meta {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  flex-grow: 1;
+  overflow: hidden;
 }
 
 .title {
-  font-size: 14px;
-  line-height: 1.3;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-dark);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  letter-spacing: -0.1px;
 }
 
+/* Footer Section */
+.actions-footer {
+  margin-top: 4px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Keyframe Animations */
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pulseText {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}

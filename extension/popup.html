@@ -2,22 +2,55 @@
 <html>
 <head>
   <meta charset="UTF-8" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div class="panel">
+    <!-- Header -->
     <div class="header">
-      <span>Youtube Chapter Generator<br>In this video</span>
-      <button id="closeBtn">✕</button>
+      <div class="logo-area">
+        <span class="logo-title">Smart Chapters</span>
+        <span class="logo-sub">AI Generator</span>
+      </div>
+      <button id="closeBtn" aria-label="Close">✕</button>
     </div>
 
-    <div class="tabs">
-      <button class="tab active">Chapters</button>
+    <div class="divider"></div>
+
+    <!-- Loading State Section -->
+    <div id="loadingSection" class="ui-section loading-container" style="display: none;">
+      <div class="spinner-glow">
+        <div class="spinner"></div>
+      </div>
+      <div class="loading-titles">
+        <div class="loading-pulse">Analyzing Video...</div>
+        <div id="statusText" class="loading-subtext">Initializing pipeline...</div>
+      </div>
     </div>
 
-    <div id="status" class="status"></div>
+    <!-- Error State Section -->
+    <div id="errorSection" class="ui-section error-container" style="display: none;">
+      <div class="error-icon">⚠️</div>
+      <div class="error-title">Analysis Failed</div>
+      <div id="errorMsg" class="error-msg">Failed to connect to backend server.</div>
+      <button id="retryBtn" class="btn primary-btn">Try Again</button>
+    </div>
 
-    <div id="chapters" class="chapter-list"></div>
+    <!-- Chapters Content List -->
+    <div id="chapters" class="chapter-list" style="display: none;"></div>
+
+    <!-- Actions Section -->
+    <div id="actionsSection" class="actions-footer" style="display: none;">
+      <button id="regenerateBtn" class="btn secondary-btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        Regenerate Chapters
+      </button>
+    </div>
   </div>
 
   <script src="popup.js"></script>

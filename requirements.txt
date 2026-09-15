@@ -4,6 +4,6 @@ faster-whisper
 yt-dlp
 numpy
 sentence-transformers
-summa
 groq
 python-dotenv
+youtube-transcript-api
