@@ -6,6 +6,7 @@ services:
     region: oregon
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: GROQ_API_KEY
         sync: false

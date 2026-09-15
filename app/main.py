@@ -20,16 +20,19 @@ from youtube_transcript_api import YouTubeTranscriptApi
 # =========================
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-
-if not GROQ_API_KEY:
-    raise RuntimeError("GROQ_API_KEY not set")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-client = Groq(api_key=GROQ_API_KEY)
+def get_groq_client():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="GROQ_API_KEY not configured on backend. Please set it in server environment variables."
+        )
+    return Groq(api_key=api_key)
 
 # =========================
 # CACHE DIRECTORY
@@ -53,10 +56,24 @@ app.add_middleware(
 )
 
 # =========================
-# MODELS (loaded once)
+# MODELS (Lazy-loaded on demand to preserve RAM)
 # =========================
-whisper = WhisperModel("base", compute_type="int8")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+_whisper_model = None
+_embedder_model = None
+
+def get_whisper():
+    global _whisper_model
+    if _whisper_model is None:
+        logger.info("Initializing WhisperModel (base, int8)...")
+        _whisper_model = WhisperModel("base", compute_type="int8")
+    return _whisper_model
+
+def get_embedder():
+    global _embedder_model
+    if _embedder_model is None:
+        logger.info("Initializing SentenceTransformer (all-MiniLM-L6-v2)...")
+        _embedder_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedder_model
 
 # =========================
 # CONSTANTS
@@ -135,6 +152,7 @@ def transcribe(video_id: str):
 
         logger.info("Transcribing audio using Whisper (beam_size=1, VAD enabled)")
         # beam_size=1 (greedy search) is 2-3x faster. vad_filter=True ignores silence.
+        whisper = get_whisper()
         segments, _ = whisper.transcribe(audio_file, beam_size=1, vad_filter=True)
         
         cleaned = [
@@ -203,6 +221,7 @@ def llm_generate_chapters(outline_text: str):
     {outline_text}
     """
 
+    client = get_groq_client()
     response = client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
@@ -221,6 +240,7 @@ def align_chapters(chapters, segments):
     times = [s["start"] for s in segments]
 
     # Encode segment and chapter hint texts
+    embedder = get_embedder()
     embeddings = embedder.encode(texts, normalize_embeddings=True)
     hints = [ch["start_hint"] for ch in chapters]
     hint_embeddings = embedder.encode(hints, normalize_embeddings=True)
@@ -368,6 +388,7 @@ def health():
     return {
         "status": "ok",
         "llm_model": GROQ_MODEL,
+        "groq_configured": bool(os.getenv("GROQ_API_KEY")),
     }
 
 if __name__ == "__main__":

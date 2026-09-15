@@ -11,12 +11,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
     pip install --no-cache-dir -r requirements.txt
 
 # Preload models (faster first run)
-RUN python - <<EOF
-from faster_whisper import WhisperModel
-from sentence_transformers import SentenceTransformer
-WhisperModel("base", compute_type="int8")
-SentenceTransformer("all-MiniLM-L6-v2")
-EOF
+RUN python -c "from faster_whisper import WhisperModel; from sentence_transformers import SentenceTransformer; WhisperModel('base', compute_type='int8'); SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 

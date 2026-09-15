@@ -82,6 +82,7 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true
 
   # ==========================================
   # JOB 3: Trigger Render Container Deployment
