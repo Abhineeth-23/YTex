@@ -1,15 +1,19 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from faster_whisper import WhisperModel
-from sentence_transformers import SentenceTransformer
-from dotenv import load_dotenv
-from groq import Groq
-import yt_dlp
-import uuid
-import os
 import json
 import logging
+import os
+import re
+import tempfile
+import uuid
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from faster_whisper import WhisperModel
+from groq import Groq
 import numpy as np
+from sentence_transformers import SentenceTransformer
+from dotenv import load_dotenv
+import yt_dlp
+from youtube_transcript_api import YouTubeTranscriptApi
 
 # =========================
 # ENV + LOGGING
@@ -28,15 +32,23 @@ logger = logging.getLogger(__name__)
 client = Groq(api_key=GROQ_API_KEY)
 
 # =========================
+# CACHE DIRECTORY
+# =========================
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+VIDEO_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+# =========================
 # FASTAPI
 # =========================
-app = FastAPI()
+app = FastAPI(title="YT Smart Chapterizer API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # chrome-extension:// allowed
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origin_regex=r"^(chrome-extension://.*|https?://.*)$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -70,46 +82,103 @@ def sec_to_time(sec: float) -> str:
 # TRANSCRIPTION
 # =========================
 def transcribe(video_id: str):
+    # 1. Attempt to fetch pre-existing captions directly (Takes ~1 second)
+    try:
+        logger.info("Attempting to fetch pre-existing subtitles for video: %s", video_id)
+        ytt_api = YouTubeTranscriptApi()
+        transcript = ytt_api.fetch(video_id, languages=['en', 'en-US'])
+        transcript_data = transcript.to_raw_data()
+        cleaned = [
+            {"start": item["start"], "text": item["text"].strip()}
+            for item in transcript_data
+            if len(item["text"].strip()) > 3
+        ]
+        if cleaned:
+            logger.info("Successfully loaded %d captions from YouTube transcript API", len(cleaned))
+            return cleaned
+    except Exception as e:
+        logger.warning("Subtitles fetch failed: %s. Falling back to Whisper transcription.", e)
+
+    # 2. Fallback: Audio download + optimized Whisper transcription
     url = f"https://www.youtube.com/watch?v={video_id}"
-    uid = str(uuid.uuid4())
-    audio = f"{uid}.wav"
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Download low bitrate audio directly without FFmpeg wav conversion overhead
+        audio_template = os.path.join(tmpdir, "audio.%(ext)s")
 
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": uid + ".%(ext)s",
-        "quiet": True,
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
-        ],
-    }
+        ydl_opts = {
+            "format": "worstaudio/worst",
+            "outtmpl": audio_template,
+            "quiet": True,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["default", "-android_sdkless"]
+                }
+            },
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-    segments, _ = whisper.transcribe(audio)
-    os.remove(audio)
+        # Locate the downloaded file (could be webm, m4a, etc.)
+        audio_file = None
+        for file in os.listdir(tmpdir):
+            if file.startswith("audio."):
+                audio_file = os.path.join(tmpdir, file)
+                break
 
-    cleaned = [
-        {"start": s.start, "text": s.text.strip()}
-        for s in segments
-        if len(s.text.strip()) > 10
-    ]
+        if not audio_file or not os.path.exists(audio_file):
+            raise RuntimeError("Failed to download fallback audio from YouTube")
+
+        logger.info("Transcribing audio using Whisper (beam_size=1, VAD enabled)")
+        # beam_size=1 (greedy search) is 2-3x faster. vad_filter=True ignores silence.
+        segments, _ = whisper.transcribe(audio_file, beam_size=1, vad_filter=True)
+        
+        cleaned = [
+            {"start": s.start, "text": s.text.strip()}
+            for s in segments
+            if len(s.text.strip()) > 3
+        ]
 
     return cleaned
 
 # =========================
 # OUTLINE TRANSCRIPT (TOKEN SAFE)
 # =========================
-def build_outline_transcript(segments, max_lines=40):
-    step = max(1, len(segments) // max_lines)
-    return "\n".join(
-        segments[i]["text"]
-        for i in range(0, len(segments), step)
-    )
+def build_outline_transcript(segments, max_chars=20000):
+    if not segments:
+        return ""
+
+    full_text = "\n".join(f"[{sec_to_time(s['start'])}] {s['text']}" for s in segments)
+    if len(full_text) <= max_chars:
+        return full_text
+
+    # If transcript is very long, sample contiguous sentence pairs to maintain local context
+    logger.info("Transcript exceeds %d characters, condensing...", max_chars)
+    step = max(1, len(segments) // 50)
+    chunks = []
+    for i in range(0, len(segments), step):
+        chunk = " ".join(s["text"] for s in segments[i:i+2])
+        chunks.append(f"[{sec_to_time(segments[i]['start'])}] {chunk}")
+    return "\n".join(chunks)
 
 # =========================
 # LLM: TOPIC PLANNING ONLY
 # =========================
+def safe_json_loads(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        return json.loads(text[start : end + 1])
+
+
 def llm_generate_chapters(outline_text: str):
     prompt = f"""
     You are a professional YouTube video editor.
@@ -142,7 +211,7 @@ def llm_generate_chapters(outline_text: str):
     )
 
     content = response.choices[0].message.content.strip()
-    return json.loads(content)
+    return safe_json_loads(content)
 
 # =========================
 # ALIGN CHAPTERS TO TIMESTAMPS
@@ -151,25 +220,55 @@ def align_chapters(chapters, segments):
     texts = [s["text"] for s in segments]
     times = [s["start"] for s in segments]
 
+    # Encode segment and chapter hint texts
     embeddings = embedder.encode(texts, normalize_embeddings=True)
+    hints = [ch["start_hint"] for ch in chapters]
+    hint_embeddings = embedder.encode(hints, normalize_embeddings=True)
+
+    # Compute similarity matrix (K, N) where sims[i][j] = dot(hint_i, segment_j)
+    sims = np.dot(hint_embeddings, embeddings.T)
+
+    K = len(chapters)
+    N = len(segments)
+
+    # Use Dynamic Programming to find indices 0 <= j_0 < j_1 < ... < j_{K-1} < N
+    # maximizing the sum of semantic similarities.
+    dp = np.full((K, N), -np.inf)
+    parent = np.full((K, N), -1, dtype=int)
+
+    # Base case: first chapter (i = 0)
+    dp[0, :] = sims[0, :]
+
+    # DP state transitions: dp[i][j] = sims[i][j] + max_{j' < j} dp[i-1][j']
+    for i in range(1, K):
+        max_prev_val = -np.inf
+        max_prev_idx = -1
+        for j in range(N):
+            if j > 0 and dp[i-1, j-1] > max_prev_val:
+                max_prev_val = dp[i-1, j-1]
+                max_prev_idx = j - 1
+            if max_prev_idx != -1:
+                dp[i, j] = sims[i, j] + max_prev_val
+                parent[i, j] = max_prev_idx
+
+    # Reconstruct optimal chronological indices
+    best_j = int(np.argmax(dp[K-1, :]))
+    if dp[K-1, best_j] == -np.inf:
+        # DP failed (e.g. N < K), fallback to sequential mapping
+        logger.warning("DP alignment failed. Falling back to sequential index mapping.")
+        indices = [min(i * (N // K), N - 1) for i in range(K)]
+    else:
+        indices = []
+        curr_j = best_j
+        for i in range(K-1, -1, -1):
+            indices.append(curr_j)
+            curr_j = parent[i, curr_j]
+        indices.reverse()
 
     final = []
-    used_times = set()
-
-    for ch in chapters:
-        hint_emb = embedder.encode(
-            [ch["start_hint"]],
-            normalize_embeddings=True,
-        )[0]
-
-        sims = np.dot(embeddings, hint_emb)
-        idx = int(np.argmax(sims))
-        ts = times[idx]
-
-        if ts in used_times:
-            continue
-
-        used_times.add(ts)
+    for idx_ch, idx_seg in enumerate(indices):
+        ts = times[idx_seg]
+        ch = chapters[idx_ch]
         final.append(f"{sec_to_time(ts)} {ch['title']}")
 
     return final
@@ -178,14 +277,19 @@ def align_chapters(chapters, segments):
 # FALLBACK (NEVER GARBAGE)
 # =========================
 def fallback_chapters(segments):
-    step = max(1, len(segments) // len(FALLBACK_TOPICS))
-    chapters = []
+    n = len(segments)
+    if n < 3:
+        return ["0:00 Video Start"]
 
-    for i, title in enumerate(FALLBACK_TOPICS):
-        idx = min(i * step, len(segments) - 1)
-        chapters.append(
-            f"{sec_to_time(segments[idx]['start'])} {title}"
-        )
+    # Space 5-6 dynamic sequential parts across segments
+    num_chapters = min(6, max(3, n // 10))
+    step = n // num_chapters
+    chapters = []
+    for i in range(num_chapters):
+        idx = i * step
+        ts = segments[idx]["start"]
+        part_name = f"Part {i + 1}" if i > 0 else "Introduction"
+        chapters.append(f"{sec_to_time(ts)} {part_name}")
 
     return chapters
 
@@ -193,15 +297,37 @@ def fallback_chapters(segments):
 # API
 # =========================
 @app.post("/chapters")
-def chapters(video_id: str):
+def chapters(video_id: str = Query(...)):
+    # 1. Regex validation for YouTube Video ID format
+    if not VIDEO_ID_REGEX.match(video_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid YouTube Video ID format"
+        )
+
+    # 2. Check local JSON cache
+    cache_path = os.path.join(CACHE_DIR, f"{video_id}.json")
+    if os.path.exists(cache_path):
+        logger.info("Serving chapters for video %s from cache", video_id)
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning("Failed to read cache for video %s: %s", video_id, e)
+
+    # 3. Process video
     try:
         segments = transcribe(video_id)
 
         if not segments:
-            return {
+            res = {
                 "video_id": video_id,
                 "chapters": ["0:00 Overview"],
             }
+            # Cache trivial output as well to avoid re-transcribing
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
+            return res
 
         outline = build_outline_transcript(segments)
 
@@ -216,17 +342,26 @@ def chapters(video_id: str):
             logger.warning("LLM failed, using fallback: %s", e)
             chapter_list = fallback_chapters(segments)
 
-        return {
+        res = {
             "video_id": video_id,
             "chapters": chapter_list,
         }
 
+        # 4. Save to cache
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning("Failed to write cache for video %s: %s", video_id, e)
+
+        return res
+
     except Exception as e:
-        logger.exception("Hard failure")
-        return {
-            "video_id": video_id,
-            "chapters": ["0:00 Failed to analyze video"],
-        }
+        logger.exception("Hard failure while generating chapters for video %s", video_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to analyze video",
+        )
 
 @app.get("/health")
 def health():
@@ -234,3 +369,8 @@ def health():
         "status": "ok",
         "llm_model": GROQ_MODEL,
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)

@@ -1,5 +1,27 @@
-__pycache__/
-*.pyc
+# Environment & Secrets
 .env
-.venv
-.git
+.env.*
+*.env
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# Caches & Temporary Processing Files
+app/cache/
+*.mp3
+*.wav
+*.m4a
+*.webm
+*.ogg
+*.flac
+
+# Local Artifacts & Zips
+yt-smart-chapterizer.zip
+.DS_Store
+Thumbs.db
+.superpowers/
