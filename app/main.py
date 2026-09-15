@@ -55,6 +55,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def root():
+    return {
+        "service": "YT Smart Chapterizer API",
+        "status": "online",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "generate_chapters": "POST /chapters?video_id={youtube_id}"
+        }
+    }
+
 # =========================
 # MODELS (Lazy-loaded on demand to preserve RAM)
 # =========================
