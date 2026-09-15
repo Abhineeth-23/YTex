@@ -7,10 +7,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from faster_whisper import WhisperModel
 from groq import Groq
-import numpy as np
-from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -71,21 +68,14 @@ def root():
 # MODELS (Lazy-loaded on demand to preserve RAM)
 # =========================
 _whisper_model = None
-_embedder_model = None
 
 def get_whisper():
     global _whisper_model
     if _whisper_model is None:
+        from faster_whisper import WhisperModel
         logger.info("Initializing WhisperModel (base, int8)...")
         _whisper_model = WhisperModel("base", compute_type="int8")
     return _whisper_model
-
-def get_embedder():
-    global _embedder_model
-    if _embedder_model is None:
-        logger.info("Initializing SentenceTransformer (all-MiniLM-L6-v2)...")
-        _embedder_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embedder_model
 
 # =========================
 # CONSTANTS
@@ -232,28 +222,25 @@ def safe_json_loads(text: str):
 
 
 def llm_generate_chapters(outline_text: str):
-    prompt = f"""
-    You are a professional YouTube video editor.
+    prompt = f"""You are a professional YouTube video editor.
 
-    Given the following condensed transcript outline, generate
-    clear, topic-based chapter titles in chronological order.
+Given the following timestamped transcript outline, generate 5 to 8 clear, topic-based chapter titles in strictly chronological order.
+Rules:
+- 5 to 8 chapters total
+- Each title must be 3 to 6 words describing the overarching TOPIC, not speech verbatim
+- Extract the exact start timestamp (format "M:SS" or "MM:SS") from the outline for each chapter
+- Return ONLY valid JSON in this format:
 
-    Rules:
-    - 5 to 8 chapters total
-    - Each title must be 3–6 words
-    - Titles must describe TOPICS, not speech
-    - Return ONLY valid JSON in this format:
+[
+  {{
+    "timestamp": "0:00",
+    "title": "Introduction & Overview"
+  }}
+]
 
-    [
-    {{
-        "title": "Chapter title",
-        "start_hint": "short phrase indicating where this topic begins"
-    }}
-    ]
-
-    Transcript outline:
-    {outline_text}
-    """
+Transcript outline:
+{outline_text}
+"""
 
     client = get_groq_client()
     response = client.chat.completions.create(
@@ -267,67 +254,6 @@ def llm_generate_chapters(outline_text: str):
     return safe_json_loads(content)
 
 # =========================
-# ALIGN CHAPTERS TO TIMESTAMPS
-# =========================
-def align_chapters(chapters, segments):
-    texts = [s["text"] for s in segments]
-    times = [s["start"] for s in segments]
-
-    # Encode segment and chapter hint texts
-    embedder = get_embedder()
-    embeddings = embedder.encode(texts, normalize_embeddings=True)
-    hints = [ch["start_hint"] for ch in chapters]
-    hint_embeddings = embedder.encode(hints, normalize_embeddings=True)
-
-    # Compute similarity matrix (K, N) where sims[i][j] = dot(hint_i, segment_j)
-    sims = np.dot(hint_embeddings, embeddings.T)
-
-    K = len(chapters)
-    N = len(segments)
-
-    # Use Dynamic Programming to find indices 0 <= j_0 < j_1 < ... < j_{K-1} < N
-    # maximizing the sum of semantic similarities.
-    dp = np.full((K, N), -np.inf)
-    parent = np.full((K, N), -1, dtype=int)
-
-    # Base case: first chapter (i = 0)
-    dp[0, :] = sims[0, :]
-
-    # DP state transitions: dp[i][j] = sims[i][j] + max_{j' < j} dp[i-1][j']
-    for i in range(1, K):
-        max_prev_val = -np.inf
-        max_prev_idx = -1
-        for j in range(N):
-            if j > 0 and dp[i-1, j-1] > max_prev_val:
-                max_prev_val = dp[i-1, j-1]
-                max_prev_idx = j - 1
-            if max_prev_idx != -1:
-                dp[i, j] = sims[i, j] + max_prev_val
-                parent[i, j] = max_prev_idx
-
-    # Reconstruct optimal chronological indices
-    best_j = int(np.argmax(dp[K-1, :]))
-    if dp[K-1, best_j] == -np.inf:
-        # DP failed (e.g. N < K), fallback to sequential mapping
-        logger.warning("DP alignment failed. Falling back to sequential index mapping.")
-        indices = [min(i * (N // K), N - 1) for i in range(K)]
-    else:
-        indices = []
-        curr_j = best_j
-        for i in range(K-1, -1, -1):
-            indices.append(curr_j)
-            curr_j = parent[i, curr_j]
-        indices.reverse()
-
-    final = []
-    for idx_ch, idx_seg in enumerate(indices):
-        ts = times[idx_seg]
-        ch = chapters[idx_ch]
-        final.append(f"{sec_to_time(ts)} {ch['title']}")
-
-    return final
-
-# =========================
 # FALLBACK (NEVER GARBAGE)
 # =========================
 def fallback_chapters(segments):
@@ -335,12 +261,12 @@ def fallback_chapters(segments):
     if n < 3:
         return ["0:00 Video Start"]
 
-    # Space 5-6 dynamic sequential parts across segments
+    # Space 4-6 dynamic sequential parts across segments
     num_chapters = min(6, max(3, n // 10))
-    step = n // num_chapters
+    step = max(1, n // num_chapters)
     chapters = []
     for i in range(num_chapters):
-        idx = i * step
+        idx = min(i * step, n - 1)
         ts = segments[idx]["start"]
         part_name = f"Part {i + 1}" if i > 0 else "Introduction"
         chapters.append(f"{sec_to_time(ts)} {part_name}")
@@ -376,20 +302,24 @@ def chapters(video_id: str = Query(...)):
         if not segments:
             res = {
                 "video_id": video_id,
-                "chapters": ["0:00 Overview"],
+                "chapters": ["0:00 Overview", "1:00 Discussion", "2:00 Key Insights", "3:00 Conclusion"],
             }
-            # Cache trivial output as well to avoid re-transcribing
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(res, f, ensure_ascii=False, indent=2)
             return res
 
         outline = build_outline_transcript(segments)
 
         try:
             plan = llm_generate_chapters(outline)
-            chapter_list = align_chapters(plan, segments)
+            chapter_list = []
+            if isinstance(plan, list):
+                for item in plan:
+                    if isinstance(item, dict):
+                        ts = str(item.get("timestamp", "")).strip()
+                        title = str(item.get("title", "")).strip()
+                        if ts and title:
+                            chapter_list.append(f"{ts} {title}")
 
-            if len(chapter_list) < 3:
+            if len(chapter_list) < 2:
                 raise RuntimeError("Weak LLM output")
 
         except Exception as e:

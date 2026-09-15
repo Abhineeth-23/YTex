@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Preload models (faster first run)
-RUN python -c "from faster_whisper import WhisperModel; from sentence_transformers import SentenceTransformer; WhisperModel('base', compute_type='int8'); SentenceTransformer('all-MiniLM-L6-v2')"
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', compute_type='int8')"
 
 COPY . .
 
